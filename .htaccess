@@ -1,0 +1,21 @@
+<IfModule mod_mime.c>
+	# Ensure ES modules and related assets have proper MIME types
+	AddType application/javascript .mjs
+	AddType application/javascript .js
+	AddType text/css .css
+	AddType application/json .json
+	AddType image/svg+xml .svg
+	AddType image/png .png
+	AddType image/jpeg .jpg .jpeg
+	AddType font/woff2 .woff2
+	AddType application/wasm .wasm
+</IfModule>
+
+# Allow cross-origin for pdf.js worker if needed (optional; adjust as appropriate)
+# <IfModule mod_headers.c>
+#   <FilesMatch "\.worker\.mjs$">
+#     Header set Cross-Origin-Embedder-Policy "require-corp"
+#     Header set Cross-Origin-Opener-Policy "same-origin"
+#   </FilesMatch>
+# </IfModule>
+
