@@ -20,12 +20,11 @@ html, body, #root {
   background: rgb(212 212 215); /* 默认背景与页间填充色 */
   padding-top: var(--page-gap); /* 第一页与顶部的间距 */
   padding-bottom: var(--page-gap); /* 最后一页与底部的间距 */
-  overscroll-behavior: contain; /* 防止滚动链路到外层页面 */
+  overscroll-behavior: contain; /* 防止滚动事件冒泡到外层页面 */
 }
 
 /* Page wrapper centers the canvas horizontally while allowing full width */
 .pdf-page {
-  position: relative; /* 供骨架定位 */
   display: flex;
   justify-content: flex-start; /* 默认左对齐，放大时使用全局横向滚动 */
   align-items: flex-start;
@@ -44,10 +43,16 @@ html, body, #root {
   justify-content: center;
 }
 
+/* 首次/未渲染时的骨架状态：水平居中 */
+.pdf-page.skeleton {
+  justify-content: center;
+}
+
 .pdf-canvas {
   background: #fff;
   box-shadow: 0 0 12px rgba(0,0,0,0.3);
   display: block; /* 避免行内空隙影响宽度计算 */
+  transform-origin: top left; /* 让临时缩放从左上角开始，视觉更自然 */
 }
 
 /* Floating bottom controls */
@@ -177,32 +182,4 @@ html, body, #root {
 
 .read-the-docs {
   color: #888;
-}
-
-/* 渲染中：隐藏画布，显示骨架屏 */
-.pdf-page.loading .pdf-canvas {
-  visibility: hidden;
-}
-
-/* 骨架宽度跟随 --page-skel-w（由 JS 设置），默认 90% */
-.pdf-page.loading::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  /* 放大超宽时左对齐，缩小时配合 .centered 居中 */
-  left: 0;
-  transform: none;
-  width: var(--page-skel-w, 90%);
-  height: 100%;
-  background: #fff;
-  box-shadow: 0 0 12px rgba(0,0,0,0.3);
-  border-radius: 0;
-  background-image: none;
-  animation: none;
-}
-
-/* 缩小时水平居中 */
-.pdf-page.centered.loading::before {
-  left: 50%;
-  transform: translateX(-50%);
 }
