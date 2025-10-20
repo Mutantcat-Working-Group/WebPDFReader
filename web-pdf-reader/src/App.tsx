@@ -154,7 +154,9 @@ function App() {
       const shouldCenter = viewport.width <= container.clientWidth
       wrapper.classList.toggle('centered', shouldCenter)
       wrapper.classList.add('mounted')
-      wrapper.classList.add('loading') // 开始渲染：进入 loading
+      wrapper.classList.add('loading')
+      // 让骨架宽度与当前缩放后的页面宽度一致
+      wrapper.style.setProperty('--page-skel-w', `${Math.floor(viewport.width)}px`)
     }
 
     const ctx = canvas.getContext('2d')
@@ -336,13 +338,22 @@ function App() {
               const pageNo = i + 1
               const mounted = mountedPages.has(pageNo)
               const placeholderH = pageHeightsRef.current.get(pageNo) ?? estimateHeightPx()
+              const estSkelW = Math.floor((containerRef.current?.clientWidth || 0) * scale) // 估算骨架宽度
               return (
                 <div
                   key={pageNo}
                   id={`pdf-page-${pageNo}`}
                   data-page={pageNo}
-                  className={`pdf-page${mounted ? ' mounted loading' : ' loading'}`} // 未挂载或渲染中都显示骨架
-                  style={!mounted ? { height: `${placeholderH}px` } : undefined}
+                  className={`pdf-page${mounted ? ' mounted loading' : ' loading'}`}
+                  style={
+                    !mounted
+                      ? ({
+                          height: `${placeholderH}px`,
+                          // 未挂载时也根据缩放设置骨架宽度
+                          ['--page-skel-w' as any]: `${estSkelW}px`,
+                        } as any)
+                      : undefined
+                  }
                 >
                   {mounted ? (
                     <canvas

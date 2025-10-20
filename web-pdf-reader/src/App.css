@@ -184,18 +184,25 @@ html, body, #root {
   visibility: hidden;
 }
 
-/* 简洁骨架：纯白矩形，居中，宽度 90% */
+/* 骨架宽度跟随 --page-skel-w（由 JS 设置），默认 90% */
 .pdf-page.loading::before {
   content: '';
   position: absolute;
   top: 0;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 90%;                  /* 默认 90% 宽度 */
+  /* 放大超宽时左对齐，缩小时配合 .centered 居中 */
+  left: 0;
+  transform: none;
+  width: var(--page-skel-w, 90%);
   height: 100%;
   background: #fff;
   box-shadow: 0 0 12px rgba(0,0,0,0.3);
   border-radius: 0;
   background-image: none;
   animation: none;
+}
+
+/* 缩小时水平居中 */
+.pdf-page.centered.loading::before {
+  left: 50%;
+  transform: translateX(-50%);
 }
