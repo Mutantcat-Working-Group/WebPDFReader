@@ -31,6 +31,9 @@ function App() {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const pageCanvasRefs = useRef<Array<HTMLCanvasElement | null>>([])
   const renderTaskMapRef = useRef<Map<number, any>>(new Map())
+// 新增：可视页集合与渲染代数
+  const visiblePagesRef = useRef<Set<number>>(new Set())
+  const renderGenRef = useRef(0)
 
   // 配置 pdf.js worker
   useEffect(() => {
@@ -107,7 +110,6 @@ function App() {
     const canvas = pageCanvasRefs.current[pageNo - 1]
     if (!container || !canvas) return
 
-    // 取消该页的上次渲染
     const prevTask = renderTaskMapRef.current.get(pageNo)
     if (prevTask) {
       try { prevTask.cancel() } catch {}
@@ -116,35 +118,34 @@ function App() {
 
     const page: PDFPageProxy = await doc.getPage(pageNo)
 
-  // 计算最终缩放：始终适配容器宽度 * 手动缩放
+    // 计算最终缩放：始终适配容器宽度 * 手动缩放
     const unscaledViewport = page.getViewport({ scale: 1 })
     const containerWidth = container.clientWidth
-  const widthScale = containerWidth / unscaledViewport.width
+    const widthScale = containerWidth / unscaledViewport.width
     const finalScale = widthScale * baseScale
-
     const viewport = page.getViewport({ scale: finalScale })
+
+    // 提前决定是否居中，避免初始左对齐闪动
+    const pageWrapper = document.getElementById(`pdf-page-${pageNo}`)
+    if (pageWrapper) {
+      const shouldCenter = viewport.width <= container.clientWidth
+      pageWrapper.classList.toggle('centered', shouldCenter)
+    }
+
     const ctx = canvas.getContext('2d')
     if (!ctx) return
 
     const dpr = window.devicePixelRatio || 1
     canvas.width = Math.floor(viewport.width * dpr)
     canvas.height = Math.floor(viewport.height * dpr)
-  // 设置 CSS 尺寸与渲染视口一致，保证等比例缩放
-  canvas.style.width = `${Math.floor(viewport.width)}px`
-  canvas.style.height = `${Math.floor(viewport.height)}px`
+    canvas.style.width = `${Math.floor(viewport.width)}px`
+    canvas.style.height = `${Math.floor(viewport.height)}px`
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
 
     const renderTask = page.render({ canvasContext: ctx, viewport })
     renderTaskMapRef.current.set(pageNo, renderTask)
     await renderTask.promise
     renderTaskMapRef.current.delete(pageNo)
-
-    // 根据渲染后页面宽度是否小于等于容器宽度，切换页容器的居中样式
-    const pageWrapper = document.getElementById(`pdf-page-${pageNo}`)
-    if (pageWrapper) {
-      const shouldCenter = viewport.width <= container.clientWidth
-      pageWrapper.classList.toggle('centered', shouldCenter)
-    }
   }, [])
 
   // 在 pdf / 页码 / 缩放变化时渲染
@@ -156,25 +157,80 @@ function App() {
     }
   }, [pdf, numPages, scale, renderPage])
 
-  // 窗口大小变化时，若启用宽度适配则重新渲染
+  // 新增：用 IntersectionObserver 追踪可视页
   useEffect(() => {
-    function onResize() {
-      if (pdf && numPages) {
-        for (let i = 1; i <= numPages; i++) {
-          renderPage(pdf, i, scale)
+    const container = containerRef.current
+    if (!container || !numPages) return
+    const io = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          const el = entry.target as HTMLElement
+          const pageNo = Number(el.dataset.page)
+          if (entry.isIntersecting) {
+            visiblePagesRef.current.add(pageNo)
+          } else {
+            visiblePagesRef.current.delete(pageNo)
+          }
         }
+      },
+      { root: container, threshold: 0.1, rootMargin: '200px 0px 200px 0px' }
+    )
+    const nodes = Array.from(container.querySelectorAll('[data-page]'))
+    nodes.forEach((n) => io.observe(n))
+    return () => io.disconnect()
+  }, [numPages])
+
+  // 新增：优先渲染可视页，其余分批渲染
+  const renderPrioritized = useCallback(() => {
+    if (!pdf || !numPages) return
+    const gen = ++renderGenRef.current
+
+    const all = Array.from({ length: numPages }, (_, i) => i + 1)
+    const visible = Array.from(visiblePagesRef.current).sort((a, b) => a - b)
+    const rest = all.filter((n) => !visible.includes(n))
+
+    ;(async () => {
+      // 先渲染可视页（顺序执行，保证尽快看到）
+      for (const n of visible) {
+        if (renderGenRef.current !== gen) return
+        await renderPage(pdf, n, scale)
       }
-    }
-    window.addEventListener('resize', onResize)
-    return () => window.removeEventListener('resize', onResize)
+
+      // 剩余页分批在空闲时渲染，降低卡顿
+      const ric: any = (window as any).requestIdleCallback || ((cb: any) => setTimeout(cb, 0))
+      let idx = 0
+      function step() {
+        if (renderGenRef.current !== gen) return
+        const batch = rest.slice(idx, idx + 2) // 每次最多两页
+        idx += batch.length
+        batch.forEach((n) => renderPage(pdf, n, scale)) // 并行触发即可，会自行排队
+        if (idx < rest.length) ric(step)
+      }
+      ric(step)
+    })()
   }, [pdf, numPages, scale, renderPage])
 
-  // 平滑滚动到目标页
+  // 首次加载与缩放时触发优先渲染
+  useEffect(() => {
+    renderPrioritized()
+  }, [renderPrioritized])
+
+  // 窗口尺寸变化时也走优先渲染
+  useEffect(() => {
+    const onResize = () => renderPrioritized()
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [renderPrioritized])
+
+  // 平滑滚动到目标页（仅滚动内部容器）
   const scrollToPage = (target: number) => {
     const container = containerRef.current
     const el = document.getElementById(`pdf-page-${target}`)
     if (!container || !el) return
-    el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    const cRect = container.getBoundingClientRect()
+    const eRect = el.getBoundingClientRect()
+    const targetTop = container.scrollTop + (eRect.top - cRect.top)
+    container.scrollTo({ top: targetTop, behavior: 'smooth' })
   }
 
   const goPrev = () => {
@@ -256,16 +312,16 @@ function App() {
       {controlsVisible && (
         <div className="pdf-controls">
           <div className="pdf-controls-inner">
-            <button onClick={goPrev} disabled={!pdf || pageNumber <= 1}>上一页</button>
-            <button onClick={goNext} disabled={!pdf || pageNumber >= numPages}>下一页</button>
+            <button className="nav-btn" onClick={goPrev} disabled={!pdf || pageNumber <= 1}>上一页</button>
+            <button className="nav-btn" onClick={goNext} disabled={!pdf || pageNumber >= numPages}>下一页</button>
             <span style={{ marginLeft: 8 }}>
               {isMobile
                 ? `${pdf ? pageNumber : '-'} / ${pdf ? numPages : '-'}`
                 : `第 ${pdf ? pageNumber : '-'} / ${pdf ? numPages : '-'} 页`}
             </span>
             <span style={{ width: 12 }} />
-            <button onClick={zoomOut} disabled={!pdf}>{isMobile ? '-' : '缩小'}</button>
-            <button onClick={zoomIn} disabled={!pdf}>{isMobile ? '+' : '放大'}</button>
+            <button className="zoom-btn" onClick={zoomOut} disabled={!pdf}>{isMobile ? '-' : '缩小'}</button>
+            <button className="zoom-btn" onClick={zoomIn} disabled={!pdf}>{isMobile ? '+' : '放大'}</button>
             <span style={{ marginLeft: 8 }}>
               缩放: {`${Math.round(scale * 100)}%`}
             </span>

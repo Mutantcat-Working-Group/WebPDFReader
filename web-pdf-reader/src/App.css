@@ -20,6 +20,7 @@ html, body, #root {
   background: rgb(212 212 215); /* 默认背景与页间填充色 */
   padding-top: var(--page-gap); /* 第一页与顶部的间距 */
   padding-bottom: var(--page-gap); /* 最后一页与底部的间距 */
+  overscroll-behavior: contain; /* 防止滚动链路到外层页面 */
 }
 
 /* Page wrapper centers the canvas horizontally while allowing full width */
@@ -113,6 +114,21 @@ html, body, #root {
   .pdf-controls button {
     padding: 6px 8px;
     font-size: 13px;
+  }
+  /* 移动端：上一页/下一页固定尺寸与较小字体 */
+  .pdf-controls .nav-btn {
+    min-width: 64px;
+    height: 32px;
+    font-size: 12px;
+    line-height: 20px;
+    padding: 6px 8px;
+  }
+  /* 保证 +/- 按钮在移动端等宽 */
+  .pdf-controls .zoom-btn {
+    width: 36px; /* 固定宽度，确保 '+' 与 '-' 尺寸一致 */
+    text-align: center;
+    padding-left: 0;
+    padding-right: 0;
   }
   /* 缩小文字并避免换行，防止“缩放: 100%+”挤到第二行 */
   .pdf-controls-inner span {
