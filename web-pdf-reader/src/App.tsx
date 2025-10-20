@@ -136,11 +136,8 @@ function App() {
     const canvas = pageCanvasRefs.current.get(pageNo) || null
     if (!container || !canvas) return
     if (renderedGenRef.current.get(pageNo) === gen) return
-
-    // 若该页已被卸载，取消
     if (!mountedPages.has(pageNo)) return
 
-    // 取消旧任务
     const prevTask = renderTaskMapRef.current.get(pageNo)
     if (prevTask) { try { prevTask.cancel() } catch {} renderTaskMapRef.current.delete(pageNo) }
 
@@ -152,12 +149,12 @@ function App() {
     const finalScale = widthScale * baseScale
     const viewport = page.getViewport({ scale: finalScale })
 
-    // 居中/左对齐
     const wrapper = document.getElementById(`pdf-page-${pageNo}`)
     if (wrapper) {
       const shouldCenter = viewport.width <= container.clientWidth
       wrapper.classList.toggle('centered', shouldCenter)
-      wrapper.classList.add('mounted')
+      wrapper.classList.remove('ready')      // 渲染前确保骨架可见
+      wrapper.classList.add('rendering')
     }
 
     const ctx = canvas.getContext('2d')
@@ -176,8 +173,12 @@ function App() {
     renderTaskMapRef.current.delete(pageNo)
     renderedGenRef.current.set(pageNo, gen)
 
-    // 记录真实高度，供占位使用
     pageHeightsRef.current.set(pageNo, Math.floor(viewport.height))
+
+    if (wrapper) {
+      wrapper.classList.add('ready')         // 渲染完成：canvas 淡入、骨架淡出
+      wrapper.classList.remove('rendering')
+    }
   }, [mountedPages])
 
   // 并发队列
@@ -330,7 +331,7 @@ function App() {
               const mounted = mountedPages.has(pageNo)
               const placeholderH = pageHeightsRef.current.get(pageNo) ?? estimateHeightPx()
               const containerW = containerRef.current?.clientWidth ?? 0
-              const placeholderW = Math.max(1, Math.floor(containerW * scale)) // 估算与当前缩放一致的页宽
+              const placeholderW = Math.max(1, Math.floor(containerW * scale))
               const shouldCenter = placeholderW <= containerW
 
               return (
@@ -342,13 +343,17 @@ function App() {
                   style={!mounted ? { height: `${placeholderH}px` } : undefined}
                 >
                   {mounted ? (
-                    <canvas
-                      ref={(el) => {
-                        if (el) pageCanvasRefs.current.set(pageNo, el)
-                        else pageCanvasRefs.current.delete(pageNo)
-                      }}
-                      className="pdf-canvas"
-                    />
+                    <>
+                      <canvas
+                        ref={(el) => {
+                          if (el) pageCanvasRefs.current.set(pageNo, el)
+                          else pageCanvasRefs.current.delete(pageNo)
+                        }}
+                        className="pdf-canvas"
+                      />
+                     {/* 覆盖骨架：与 canvas 同区域，渲染完成后自动淡出 */}
+                     <div className="pdf-skeleton overlay" />
+                    </>
                   ) : (
                     <div
                       className="pdf-skeleton"

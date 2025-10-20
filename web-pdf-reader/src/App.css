@@ -31,6 +31,7 @@ html, body, #root {
   padding: 0;
   width: 100%;
   overflow: visible; /* 由总容器负责横向滚动 */
+  position: relative; /* 让 overlay 骨架可绝对定位覆盖 */
 }
 
 /* 第二页起与上一页保持相同间距 */
@@ -43,14 +44,20 @@ html, body, #root {
   justify-content: center;
 }
 
+/* Canvas 采用淡入，避免闪烁 */
 .pdf-canvas {
   background: #fff;
   border-radius: 4px;
   display: block;
   box-shadow: 0 1px 3px rgba(0,0,0,0.08), 0 6px 20px rgba(0,0,0,0.08);
+  opacity: 0;
+  transition: opacity 160ms ease;
 }
+.pdf-page.ready .pdf-canvas {
+   opacity: 1;
+ }
 
-/* 占位骨架样式与动画 */
+/* 占位骨架：静态卡片，不再有闪烁动画 */
 .pdf-page.placeholder {
   display: flex;
   justify-content: flex-start;
@@ -67,17 +74,25 @@ html, body, #root {
   overflow: hidden;
   display: block;
 }
-.pdf-skeleton::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  transform: translateX(-100%);
-  background: linear-gradient(90deg, rgba(255,255,255,0) 0%, rgba(0,0,0,0.06) 50%, rgba(255,255,255,0) 100%);
-  animation: pdf-skeleton-shimmer 1.2s linear infinite;
-}
-@keyframes pdf-skeleton-shimmer {
-  to { transform: translateX(100%); }
-}
+/* 覆盖骨架：挂载后在 canvas 上方，渲染完成后淡出 */
+.pdf-skeleton.overlay {
+   position: absolute;
+   inset: 0;
+   pointer-events: none;
+   opacity: 1;
+   transition: opacity 160ms ease;
+ }
+.pdf-page.ready .pdf-skeleton.overlay {
+   opacity: 0;
+   /* 可选：加 visibility 隐藏，进一步减少绘制 */
+   /* visibility: hidden; */
+ }
+
+/* 取消之前扫光动画，避免“闪两下” */
+/*
+.pdf-skeleton::after { ... }
+@keyframes pdf-skeleton-shimmer { ... }
+*/
 
 /* Floating bottom controls */
 .pdf-controls {
