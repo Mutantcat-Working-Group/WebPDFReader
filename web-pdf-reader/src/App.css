@@ -184,28 +184,18 @@ html, body, #root {
   visibility: hidden;
 }
 
-/* 骨架屏：在页容器内居中，宽度自适应，覆盖整页高度 */
+/* 简洁骨架：纯白矩形，居中，宽度 90% */
 .pdf-page.loading::before {
   content: '';
   position: absolute;
   top: 0;
   left: 50%;
   transform: translateX(-50%);
-  width: min(96%, 1200px);      /* 近似页面宽度，居中 */
-  height: 100%;                 /* 匹配占位高度或页面高度 */
-  border-radius: 8px;
-  background:
-    linear-gradient(90deg,
-      rgba(255,255,255,0.70) 25%,
-      rgba(255,255,255,0.95) 37%,
-      rgba(255,255,255,0.70) 63%);
-  background-size: 400% 100%;
-  animation: pdf-skeleton 1.2s ease-in-out infinite;
-  box-shadow: 0 0 12px rgba(0,0,0,0.25);
-}
-
-/* 骨架动画 */
-@keyframes pdf-skeleton {
-  0%   { background-position: 100% 0; }
-  100% { background-position: 0 0; }
+  width: 90%;                  /* 默认 90% 宽度 */
+  height: 100%;
+  background: #fff;
+  box-shadow: 0 0 12px rgba(0,0,0,0.3);
+  border-radius: 0;
+  background-image: none;
+  animation: none;
 }
