@@ -25,13 +25,13 @@ html, body, #root {
 
 /* Page wrapper centers the canvas horizontally while allowing full width */
 .pdf-page {
+  position: relative; /* 供骨架定位 */
   display: flex;
   justify-content: flex-start; /* 默认左对齐，放大时使用全局横向滚动 */
   align-items: flex-start;
   padding: 0;
   width: 100%;
   overflow: visible; /* 由总容器负责横向滚动 */
-  position: relative; /* 让 overlay 骨架可绝对定位覆盖 */
 }
 
 /* 第二页起与上一页保持相同间距 */
@@ -44,55 +44,11 @@ html, body, #root {
   justify-content: center;
 }
 
-/* Canvas 采用淡入，避免闪烁 */
 .pdf-canvas {
   background: #fff;
-  border-radius: 4px;
-  display: block;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.08), 0 6px 20px rgba(0,0,0,0.08);
-  opacity: 0;
-  transition: opacity 160ms ease;
+  box-shadow: 0 0 12px rgba(0,0,0,0.3);
+  display: block; /* 避免行内空隙影响宽度计算 */
 }
-.pdf-page.ready .pdf-canvas {
-   opacity: 1;
- }
-
-/* 占位骨架：静态卡片，不再有闪烁动画 */
-.pdf-page.placeholder {
-  display: flex;
-  justify-content: flex-start;
-  align-items: flex-start;
-}
-.pdf-page.centered {
-  justify-content: center;
-}
-.pdf-skeleton {
-  background: #fff;
-  border-radius: 4px;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.08), 0 6px 20px rgba(0,0,0,0.08);
-  position: relative;
-  overflow: hidden;
-  display: block;
-}
-/* 覆盖骨架：挂载后在 canvas 上方，渲染完成后淡出 */
-.pdf-skeleton.overlay {
-   position: absolute;
-   inset: 0;
-   pointer-events: none;
-   opacity: 1;
-   transition: opacity 160ms ease;
- }
-.pdf-page.ready .pdf-skeleton.overlay {
-   opacity: 0;
-   /* 可选：加 visibility 隐藏，进一步减少绘制 */
-   /* visibility: hidden; */
- }
-
-/* 取消之前扫光动画，避免“闪两下” */
-/*
-.pdf-skeleton::after { ... }
-@keyframes pdf-skeleton-shimmer { ... }
-*/
 
 /* Floating bottom controls */
 .pdf-controls {
@@ -221,4 +177,35 @@ html, body, #root {
 
 .read-the-docs {
   color: #888;
+}
+
+/* 渲染中：隐藏画布，显示骨架屏 */
+.pdf-page.loading .pdf-canvas {
+  visibility: hidden;
+}
+
+/* 骨架屏：在页容器内居中，宽度自适应，覆盖整页高度 */
+.pdf-page.loading::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(96%, 1200px);      /* 近似页面宽度，居中 */
+  height: 100%;                 /* 匹配占位高度或页面高度 */
+  border-radius: 8px;
+  background:
+    linear-gradient(90deg,
+      rgba(255,255,255,0.70) 25%,
+      rgba(255,255,255,0.95) 37%,
+      rgba(255,255,255,0.70) 63%);
+  background-size: 400% 100%;
+  animation: pdf-skeleton 1.2s ease-in-out infinite;
+  box-shadow: 0 0 12px rgba(0,0,0,0.25);
+}
+
+/* 骨架动画 */
+@keyframes pdf-skeleton {
+  0%   { background-position: 100% 0; }
+  100% { background-position: 0 0; }
 }

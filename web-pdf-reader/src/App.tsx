@@ -153,12 +153,15 @@ function App() {
     if (wrapper) {
       const shouldCenter = viewport.width <= container.clientWidth
       wrapper.classList.toggle('centered', shouldCenter)
-      wrapper.classList.remove('ready')      // 渲染前确保骨架可见
-      wrapper.classList.add('rendering')
+      wrapper.classList.add('mounted')
+      wrapper.classList.add('loading') // 开始渲染：进入 loading
     }
 
     const ctx = canvas.getContext('2d')
     if (!ctx) return
+
+    // 先隐藏默认 300x150 小白框，等设置好尺寸再显示
+    canvas.style.display = 'none'
 
     const dpr = window.devicePixelRatio || 1
     canvas.width = Math.floor(viewport.width * dpr)
@@ -167,17 +170,20 @@ function App() {
     canvas.style.height = `${Math.floor(viewport.height)}px`
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
 
+    // 尺寸就绪后再展示
+    canvas.style.display = 'block'
+
     const task = page.render({ canvasContext: ctx, viewport })
     renderTaskMapRef.current.set(pageNo, task)
-    await task.promise.catch(() => {})
-    renderTaskMapRef.current.delete(pageNo)
-    renderedGenRef.current.set(pageNo, gen)
-
-    pageHeightsRef.current.set(pageNo, Math.floor(viewport.height))
-
-    if (wrapper) {
-      wrapper.classList.add('ready')         // 渲染完成：canvas 淡入、骨架淡出
-      wrapper.classList.remove('rendering')
+    try {
+      await task.promise
+      renderedGenRef.current.set(pageNo, gen)
+      pageHeightsRef.current.set(pageNo, Math.floor(viewport.height))
+    } finally {
+      renderTaskMapRef.current.delete(pageNo)
+      // 结束渲染：退出 loading
+      const w = document.getElementById(`pdf-page-${pageNo}`)
+      w?.classList.remove('loading')
     }
   }, [mountedPages])
 
@@ -330,36 +336,23 @@ function App() {
               const pageNo = i + 1
               const mounted = mountedPages.has(pageNo)
               const placeholderH = pageHeightsRef.current.get(pageNo) ?? estimateHeightPx()
-              const containerW = containerRef.current?.clientWidth ?? 0
-              const placeholderW = Math.max(1, Math.floor(containerW * scale))
-              const shouldCenter = placeholderW <= containerW
-
               return (
                 <div
                   key={pageNo}
                   id={`pdf-page-${pageNo}`}
                   data-page={pageNo}
-                  className={`pdf-page${mounted ? ' mounted' : ' placeholder'}${shouldCenter ? ' centered' : ''}`}
+                  className={`pdf-page${mounted ? ' mounted loading' : ' loading'}`} // 未挂载或渲染中都显示骨架
                   style={!mounted ? { height: `${placeholderH}px` } : undefined}
                 >
                   {mounted ? (
-                    <>
-                      <canvas
-                        ref={(el) => {
-                          if (el) pageCanvasRefs.current.set(pageNo, el)
-                          else pageCanvasRefs.current.delete(pageNo)
-                        }}
-                        className="pdf-canvas"
-                      />
-                     {/* 覆盖骨架：与 canvas 同区域，渲染完成后自动淡出 */}
-                     <div className="pdf-skeleton overlay" />
-                    </>
-                  ) : (
-                    <div
-                      className="pdf-skeleton"
-                      style={{ width: `${placeholderW}px`, height: '100%' }}
+                    <canvas
+                      ref={(el) => {
+                        if (el) pageCanvasRefs.current.set(pageNo, el)
+                        else pageCanvasRefs.current.delete(pageNo)
+                      }}
+                      className="pdf-canvas"
                     />
-                  )}
+                  ) : null}
                 </div>
               )
             })}
