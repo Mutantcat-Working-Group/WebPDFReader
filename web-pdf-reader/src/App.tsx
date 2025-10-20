@@ -3,8 +3,6 @@ import './App.css'
 
 // pdf.js
 import * as pdfjsLib from 'pdfjs-dist'
-// 使用 Vite 等现代打包器，把 worker 当作静态资源 URL 引入
-// 若使用不同打包器，请根据其文档替换 '?url' 方案
 // @ts-ignore
 import pdfWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 
@@ -14,7 +12,6 @@ type PDFPageProxy = any
 function App() {
   const urlParam = useMemo(() => {
     const u = new URLSearchParams(window.location.search).get('url') || ''
-    // 只允许 http/https
     if (!u || !/^https?:\/\//i.test(u)) return ''
     return u
   }, [])
@@ -24,16 +21,33 @@ function App() {
   const [pdf, setPdf] = useState<PDFDocumentProxy | null>(null)
   const [pageNumber, setPageNumber] = useState<number>(1)
   const [numPages, setNumPages] = useState<number>(0)
-  const [scale, setScale] = useState<number>(0.9) // base scale for manual zoom (default 90%)
+  const [scale, setScale] = useState<number>(0.9) // 默认 90%
   const [controlsVisible, setControlsVisible] = useState<boolean>(true)
   const [isMobile, setIsMobile] = useState<boolean>(false)
 
   const containerRef = useRef<HTMLDivElement | null>(null)
-  const pageCanvasRefs = useRef<Array<HTMLCanvasElement | null>>([])
+
+  // 仅为已挂载页保存 canvas 引用：pageNo -> canvas
+  const pageCanvasRefs = useRef<Map<number, HTMLCanvasElement | null>>(new Map())
+  // 每页的渲染任务
   const renderTaskMapRef = useRef<Map<number, any>>(new Map())
-// 新增：可视页集合与渲染代数
-  const visiblePagesRef = useRef<Set<number>>(new Set())
+  // 已渲染代号（避免重复重绘）
+  const renderedGenRef = useRef<Map<number, number>>(new Map())
   const renderGenRef = useRef(0)
+
+  // 可视页集合、已挂载页集合（用于虚拟化）
+  const visiblePagesRef = useRef<Set<number>>(new Set())
+  const [mountedPages, setMountedPages] = useState<Set<number>>(new Set())
+
+  // 估算高度：用第一页的宽高比作为默认比值，未测量页面用估算撑高
+  const pageHeightsRef = useRef<Map<number, number>>(new Map())
+  const avgRatioRef = useRef<number>(1.414) // 默认近似 A4 纵向
+
+  // 渲染并发与缓冲
+  const runningRef = useRef(0)
+  const queueRef = useRef<number[]>([])
+  const MAX_CONCURRENCY = (navigator as any)?.hardwareConcurrency && (navigator as any).hardwareConcurrency <= 4 ? 1 : 2
+  const BUFFER = 2 // 可视前后缓冲页数
 
   // 配置 pdf.js worker
   useEffect(() => {
@@ -41,52 +55,71 @@ function App() {
     pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker
   }, [])
 
-  // 监听屏幕宽度以适配移动端（隐藏标题，缩放按钮用 +/-，尽量单行显示）
+  // 移动端检测
   useEffect(() => {
     const mql = window.matchMedia('(max-width: 480px)')
-    const update = (e: MediaQueryListEvent | MediaQueryList) => setIsMobile((e as MediaQueryList).matches ?? (e as MediaQueryListEvent).matches)
-    // 初始
-    setIsMobile(mql.matches)
-    // 监听变更（兼容老浏览器）
-    if (mql.addEventListener) {
-      mql.addEventListener('change', update as (this: MediaQueryList, ev: MediaQueryListEvent) => any)
-    } else if ((mql as any).addListener) {
-      ;(mql as any).addListener(update)
-    }
+    const update = () => setIsMobile(mql.matches)
+    update()
+    mql.addEventListener?.('change', update as any)
+    ;(mql as any).addListener?.(update)
     return () => {
-      if (mql.removeEventListener) {
-        mql.removeEventListener('change', update as (this: MediaQueryList, ev: MediaQueryListEvent) => any)
-      } else if ((mql as any).removeListener) {
-        ;(mql as any).removeListener(update)
-      }
+      mql.removeEventListener?.('change', update as any)
+      ;(mql as any).removeListener?.(update)
     }
   }, [])
 
-  // 加载文档
+  // 估算高度（未渲染页使用）
+  const estimateHeightPx = useCallback(() => {
+    const container = containerRef.current
+    if (!container) return 800
+    const w = container.clientWidth
+    return Math.max(1, Math.floor(w * scale * avgRatioRef.current))
+  }, [scale])
+
+  // 加载文档（范围请求，禁预取）
   useEffect(() => {
     let cancelled = false
     async function load() {
       setError(null)
       setPdf(null)
       setNumPages(0)
-  setPageNumber(1)
+      setPageNumber(1)
+      pageHeightsRef.current.clear()
+      renderedGenRef.current.clear()
+      renderGenRef.current++
 
-      if (!urlParam) {
-        setError('请指定 PDF 地址 - 本服务由mutantcat.org提供')
-        return
-      }
+      if (!urlParam) { setError('请通过 ?url=https://example.com/file.pdf 指定 PDF 地址'); return }
 
       setLoading(true)
       try {
-        // 允许跨域；目标服务器需开启 CORS
+        const sp = new URLSearchParams(window.location.search)
+        const sendCreds = sp.get('cred') === '1' || sp.get('credentials') === 'include'
+        const auth = sp.get('auth')
+        const headers = auth ? { Authorization: decodeURIComponent(auth) } : undefined
+
         const loadingTask = pdfjsLib.getDocument({
           url: urlParam,
-          withCredentials: false,
+          withCredentials: sendCreds,
+          httpHeaders: headers,
+          disableAutoFetch: true,
+          rangeChunkSize: 65536,
+          disableStream: false,
         })
         const doc: PDFDocumentProxy = await loadingTask.promise
         if (cancelled) return
+
+        // 取第一页比值作为估算
+        try {
+          const p1: PDFPageProxy = await doc.getPage(1)
+          const vp = p1.getViewport({ scale: 1 })
+          if (vp && vp.width > 0) avgRatioRef.current = vp.height / vp.width
+        } catch {}
+
         setPdf(doc)
         setNumPages(doc.numPages)
+
+        // 初次挂载首屏附近少量页，避免空白
+        setMountedPages(new Set([1, 2, 3, 4, 5]))
       } catch (e: any) {
         if (!cancelled) setError(e?.message || '加载 PDF 失败')
       } finally {
@@ -94,42 +127,37 @@ function App() {
       }
     }
     load()
-    return () => {
-      cancelled = true
-    }
-    // 仅首次和 url 变化时执行
+    return () => { cancelled = true }
   }, [urlParam])
 
-  // 渲染指定页到对应 canvas
-  const renderPage = useCallback(async (
-    doc: PDFDocumentProxy,
-    pageNo: number,
-    baseScale: number
-  ) => {
+  // 渲染指定页（等比；在绘制前决定居中与占位；记录高度）
+  const renderPage = useCallback(async (doc: PDFDocumentProxy, pageNo: number, baseScale: number, gen: number) => {
     const container = containerRef.current
-    const canvas = pageCanvasRefs.current[pageNo - 1]
+    const canvas = pageCanvasRefs.current.get(pageNo) || null
     if (!container || !canvas) return
+    if (renderedGenRef.current.get(pageNo) === gen) return
 
+    // 若该页已被卸载，取消
+    if (!mountedPages.has(pageNo)) return
+
+    // 取消旧任务
     const prevTask = renderTaskMapRef.current.get(pageNo)
-    if (prevTask) {
-      try { prevTask.cancel() } catch {}
-      renderTaskMapRef.current.delete(pageNo)
-    }
+    if (prevTask) { try { prevTask.cancel() } catch {} renderTaskMapRef.current.delete(pageNo) }
 
     const page: PDFPageProxy = await doc.getPage(pageNo)
 
-    // 计算最终缩放：始终适配容器宽度 * 手动缩放
     const unscaledViewport = page.getViewport({ scale: 1 })
     const containerWidth = container.clientWidth
     const widthScale = containerWidth / unscaledViewport.width
     const finalScale = widthScale * baseScale
     const viewport = page.getViewport({ scale: finalScale })
 
-    // 提前决定是否居中，避免初始左对齐闪动
-    const pageWrapper = document.getElementById(`pdf-page-${pageNo}`)
-    if (pageWrapper) {
+    // 居中/左对齐
+    const wrapper = document.getElementById(`pdf-page-${pageNo}`)
+    if (wrapper) {
       const shouldCenter = viewport.width <= container.clientWidth
-      pageWrapper.classList.toggle('centered', shouldCenter)
+      wrapper.classList.toggle('centered', shouldCenter)
+      wrapper.classList.add('mounted')
     }
 
     const ctx = canvas.getContext('2d')
@@ -142,95 +170,111 @@ function App() {
     canvas.style.height = `${Math.floor(viewport.height)}px`
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
 
-    const renderTask = page.render({ canvasContext: ctx, viewport })
-    renderTaskMapRef.current.set(pageNo, renderTask)
-    await renderTask.promise
+    const task = page.render({ canvasContext: ctx, viewport })
+    renderTaskMapRef.current.set(pageNo, task)
+    await task.promise.catch(() => {})
     renderTaskMapRef.current.delete(pageNo)
-  }, [])
+    renderedGenRef.current.set(pageNo, gen)
 
-  // 在 pdf / 页码 / 缩放变化时渲染
-  // 初次加载与缩放变化时渲染所有页（简单实现，可优化：懒加载/虚拟化）
-  useEffect(() => {
-    if (!pdf || !numPages) return
-    for (let i = 1; i <= numPages; i++) {
-      renderPage(pdf, i, scale)
+    // 记录真实高度，供占位使用
+    pageHeightsRef.current.set(pageNo, Math.floor(viewport.height))
+  }, [mountedPages])
+
+  // 并发队列
+  const pump = useCallback(() => {
+    if (!pdf) return
+    while (runningRef.current < MAX_CONCURRENCY && queueRef.current.length) {
+      const n = queueRef.current.shift()!
+      // 若该页不再需要，跳过
+      if (!mountedPages.has(n)) continue
+      runningRef.current++
+      renderPage(pdf, n, scale, renderGenRef.current).finally(() => {
+        runningRef.current--
+        pump()
+      })
     }
-  }, [pdf, numPages, scale, renderPage])
+  }, [pdf, renderPage, scale, mountedPages])
 
-  // 新增：用 IntersectionObserver 追踪可视页
+  // 计划渲染：可视页 + 缓冲；同时更新“挂载页”集合
+  const schedule = useCallback(() => {
+    if (!pdf || !numPages) return
+    const gen = renderGenRef.current
+    const vis = Array.from(visiblePagesRef.current).sort((a, b) => a - b)
+    const set = new Set<number>(vis)
+    const add = (n: number) => { if (n >= 1 && n <= numPages) set.add(n) }
+    for (const n of vis) for (let i = 1; i <= BUFFER; i++) { add(n - i); add(n + i) }
+    if (set.size === 0) { set.add(1); set.add(2) } // 兜底
+
+    // 更新挂载页（避免频繁 setState：只有变化时才更新）
+    setMountedPages(prev => {
+      let changed = prev.size !== set.size
+      if (!changed) for (const v of set) { if (!prev.has(v)) { changed = true; break } }
+      return changed ? new Set(set) : prev
+    })
+
+    // 构建绘制队列：仅需更新到最新代号的页
+    queueRef.current = Array.from(set).filter(n => renderedGenRef.current.get(n) !== gen)
+    queueRef.current.sort((a, b) => a - b)
+    pump()
+  }, [pdf, numPages, pump])
+
+  // 观察可视页（rootMargin 大一些，提前准备）
   useEffect(() => {
     const container = containerRef.current
     if (!container || !numPages) return
-    const io = new IntersectionObserver(
-      (entries) => {
-        for (const entry of entries) {
-          const el = entry.target as HTMLElement
-          const pageNo = Number(el.dataset.page)
-          if (entry.isIntersecting) {
-            visiblePagesRef.current.add(pageNo)
-          } else {
-            visiblePagesRef.current.delete(pageNo)
-          }
-        }
-      },
-      { root: container, threshold: 0.1, rootMargin: '200px 0px 200px 0px' }
-    )
+    const io = new IntersectionObserver((entries) => {
+      for (const e of entries) {
+        const n = Number((e.target as HTMLElement).dataset.page)
+        if (e.isIntersecting) visiblePagesRef.current.add(n)
+        else visiblePagesRef.current.delete(n)
+      }
+      schedule()
+    }, { root: container, threshold: 0.01, rootMargin: '600px 0px 600px 0px' })
     const nodes = Array.from(container.querySelectorAll('[data-page]'))
     nodes.forEach((n) => io.observe(n))
     return () => io.disconnect()
-  }, [numPages])
+  }, [numPages, schedule])
 
-  // 新增：优先渲染可视页，其余分批渲染
-  const renderPrioritized = useCallback(() => {
-    if (!pdf || !numPages) return
-    const gen = ++renderGenRef.current
-
-    const all = Array.from({ length: numPages }, (_, i) => i + 1)
-    const visible = Array.from(visiblePagesRef.current).sort((a, b) => a - b)
-    const rest = all.filter((n) => !visible.includes(n))
-
-    ;(async () => {
-      // 先渲染可视页（顺序执行，保证尽快看到）
-      for (const n of visible) {
-        if (renderGenRef.current !== gen) return
-        await renderPage(pdf, n, scale)
-      }
-
-      // 剩余页分批在空闲时渲染，降低卡顿
-      const ric: any = (window as any).requestIdleCallback || ((cb: any) => setTimeout(cb, 0))
-      let idx = 0
-      function step() {
-        if (renderGenRef.current !== gen) return
-        const batch = rest.slice(idx, idx + 2) // 每次最多两页
-        idx += batch.length
-        batch.forEach((n) => renderPage(pdf, n, scale)) // 并行触发即可，会自行排队
-        if (idx < rest.length) ric(step)
-      }
-      ric(step)
-    })()
-  }, [pdf, numPages, scale, renderPage])
-
-  // 首次加载与缩放时触发优先渲染
+  // 尺寸或缩放变化：刷新代号，仅渲染窗口内页
   useEffect(() => {
-    renderPrioritized()
-  }, [renderPrioritized])
-
-  // 窗口尺寸变化时也走优先渲染
-  useEffect(() => {
-    const onResize = () => renderPrioritized()
+    const onResize = () => {
+      renderedGenRef.current.clear()
+      pageHeightsRef.current.clear()
+      renderGenRef.current++
+      schedule()
+    }
     window.addEventListener('resize', onResize)
     return () => window.removeEventListener('resize', onResize)
-  }, [renderPrioritized])
+  }, [schedule])
 
-  // 平滑滚动到目标页（仅滚动内部容器）
+  useEffect(() => {
+    renderedGenRef.current.clear()
+    pageHeightsRef.current.clear()
+    renderGenRef.current++
+    schedule()
+  }, [scale, schedule])
+
+  // 当挂载集合变化：取消不再需要的渲染任务（节流负载）
+  useEffect(() => {
+    for (const [pageNo, task] of renderTaskMapRef.current) {
+      if (!mountedPages.has(pageNo)) {
+        try { task.cancel() } catch {}
+        renderTaskMapRef.current.delete(pageNo)
+      }
+    }
+    // 继续推进绘制
+    pump()
+  }, [mountedPages, pump])
+
+  // 翻页：只滚动内部容器
   const scrollToPage = (target: number) => {
     const container = containerRef.current
     const el = document.getElementById(`pdf-page-${target}`)
     if (!container || !el) return
     const cRect = container.getBoundingClientRect()
     const eRect = el.getBoundingClientRect()
-    const targetTop = container.scrollTop + (eRect.top - cRect.top)
-    container.scrollTo({ top: targetTop, behavior: 'smooth' })
+    const top = container.scrollTop + (eRect.top - cRect.top)
+    container.scrollTo({ top, behavior: 'smooth' })
   }
 
   const goPrev = () => {
@@ -250,14 +294,14 @@ function App() {
   const zoomIn = () => setScale((s) => Math.min(5, +(s + 0.2).toFixed(2)))
   const zoomOut = () => setScale((s) => Math.max(0.2, +(s - 0.2).toFixed(2)))
 
-  // 根据滚动位置更新当前页码（简单估算：找到顶部最近的页）
+  // 仅基于“已挂载页”估算当前页，避免遍历所有节点
   useEffect(() => {
     const container = containerRef.current
     if (!container) return
     const handler = () => {
-      const pages = Array.from(container.querySelectorAll('[data-page]')) as HTMLElement[]
+      const pages = Array.from(container.querySelectorAll('.pdf-page.mounted')) as HTMLElement[]
       const containerTop = container.getBoundingClientRect().top
-      let current = 1
+      let current = pageNumber
       let minDelta = Number.POSITIVE_INFINITY
       for (const el of pages) {
         const rect = el.getBoundingClientRect()
@@ -270,31 +314,41 @@ function App() {
       setPageNumber(current)
     }
     container.addEventListener('scroll', handler)
-    // 初始触发一次
     handler()
     return () => container.removeEventListener('scroll', handler)
-  }, [])
+  }, [pageNumber])
 
   return (
     <div style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
       <div ref={containerRef} className="pdf-scroll-container">
-        {loading && <div style={{ color: '#fff', padding: 12 }}>正在加载 PDF...</div>}
+        {loading && <div style={{ color: '#333', padding: 12 }}>正在加载 PDF...</div>}
         {error && <div style={{ color: 'crimson', padding: 12 }}>{error}</div>}
         {!error && pdf && (
           <div>
-            {Array.from({ length: numPages }, (_, i) => (
-              <div
-                key={i}
-                id={`pdf-page-${i + 1}`}
-                data-page={i + 1}
-                className="pdf-page"
-              >
-                <canvas
-                  ref={(el) => { pageCanvasRefs.current[i] = el }}
-                  className="pdf-canvas"
-                />
-              </div>
-            ))}
+            {Array.from({ length: numPages }, (_, i) => {
+              const pageNo = i + 1
+              const mounted = mountedPages.has(pageNo)
+              const placeholderH = pageHeightsRef.current.get(pageNo) ?? estimateHeightPx()
+              return (
+                <div
+                  key={pageNo}
+                  id={`pdf-page-${pageNo}`}
+                  data-page={pageNo}
+                  className={`pdf-page${mounted ? ' mounted' : ''}`}
+                  style={!mounted ? { height: `${placeholderH}px` } : undefined}
+                >
+                  {mounted ? (
+                    <canvas
+                      ref={(el) => {
+                        if (el) pageCanvasRefs.current.set(pageNo, el)
+                        else pageCanvasRefs.current.delete(pageNo)
+                      }}
+                      className="pdf-canvas"
+                    />
+                  ) : null}
+                </div>
+              )
+            })}
           </div>
         )}
       </div>
@@ -322,7 +376,7 @@ function App() {
             <span style={{ width: 12 }} />
             <button className="zoom-btn" onClick={zoomOut} disabled={!pdf}>{isMobile ? '-' : '缩小'}</button>
             <button className="zoom-btn" onClick={zoomIn} disabled={!pdf}>{isMobile ? '+' : '放大'}</button>
-            <span style={{ marginLeft: 8 }}>
+            <span style={{ marginLeft: 8, whiteSpace: 'nowrap' }}>
               缩放: {`${Math.round(scale * 100)}%`}
             </span>
           </div>
