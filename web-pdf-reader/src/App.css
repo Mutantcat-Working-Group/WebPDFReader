@@ -45,8 +45,38 @@ html, body, #root {
 
 .pdf-canvas {
   background: #fff;
-  box-shadow: 0 0 12px rgba(0,0,0,0.3);
-  display: block; /* 避免行内空隙影响宽度计算 */
+  border-radius: 4px;
+  display: block;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.08), 0 6px 20px rgba(0,0,0,0.08);
+}
+
+/* 占位骨架样式与动画 */
+.pdf-page.placeholder {
+  display: flex;
+  justify-content: flex-start;
+  align-items: flex-start;
+}
+.pdf-page.centered {
+  justify-content: center;
+}
+.pdf-skeleton {
+  background: #fff;
+  border-radius: 4px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.08), 0 6px 20px rgba(0,0,0,0.08);
+  position: relative;
+  overflow: hidden;
+  display: block;
+}
+.pdf-skeleton::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(90deg, rgba(255,255,255,0) 0%, rgba(0,0,0,0.06) 50%, rgba(255,255,255,0) 100%);
+  animation: pdf-skeleton-shimmer 1.2s linear infinite;
+}
+@keyframes pdf-skeleton-shimmer {
+  to { transform: translateX(100%); }
 }
 
 /* Floating bottom controls */

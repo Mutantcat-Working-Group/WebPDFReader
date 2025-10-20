@@ -329,12 +329,16 @@ function App() {
               const pageNo = i + 1
               const mounted = mountedPages.has(pageNo)
               const placeholderH = pageHeightsRef.current.get(pageNo) ?? estimateHeightPx()
+              const containerW = containerRef.current?.clientWidth ?? 0
+              const placeholderW = Math.max(1, Math.floor(containerW * scale)) // 估算与当前缩放一致的页宽
+              const shouldCenter = placeholderW <= containerW
+
               return (
                 <div
                   key={pageNo}
                   id={`pdf-page-${pageNo}`}
                   data-page={pageNo}
-                  className={`pdf-page${mounted ? ' mounted' : ''}`}
+                  className={`pdf-page${mounted ? ' mounted' : ' placeholder'}${shouldCenter ? ' centered' : ''}`}
                   style={!mounted ? { height: `${placeholderH}px` } : undefined}
                 >
                   {mounted ? (
@@ -345,7 +349,12 @@ function App() {
                       }}
                       className="pdf-canvas"
                     />
-                  ) : null}
+                  ) : (
+                    <div
+                      className="pdf-skeleton"
+                      style={{ width: `${placeholderW}px`, height: '100%' }}
+                    />
+                  )}
                 </div>
               )
             })}
