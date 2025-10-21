@@ -30,6 +30,7 @@
     - https://pdfreader.mutantcat.ip-ddns.com
 
 ### 四、其他说明
+- 如遇bug可及时提交issue，当然纯文字issue描述现象也可以
 - 欢迎Fork自己的版本实现不同样式、性能、用法
 - 同时欢迎Star或者贡献本项目
 
