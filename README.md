@@ -28,7 +28,7 @@
     - https://pdfreader.jqshengtian.top
     - https://pdfreader.mutantcat.dpdns.org
     - https://pdfreader.mutantcat.ip-ddns.com
-    - https://mutantcat-working-group.github.io/WebPDFReader/
+    - https://mutantcat-working-group.github.io/WebPDFReader
 
 ### 四、其他说明
 - 如遇bug可及时提交issue，当然纯文字issue描述现象也可以
