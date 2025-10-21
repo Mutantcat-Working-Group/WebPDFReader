@@ -87,7 +87,7 @@ function App() {
       setPdf(null)
       setNumPages(0)
       setPageNumber(1)
-      if (!urlParam) { setError('请通过 ?url=https://example.com/file.pdf 指定 PDF 地址'); return }
+      if (!urlParam) { setError('请通过 ?url=https://example.com/file.pdf 指定 PDF 地址，本服务由 mutantcat.org 提供'); return }
 
       setLoading(true)
       try {
