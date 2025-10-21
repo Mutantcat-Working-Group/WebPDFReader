@@ -96,22 +96,44 @@ function App() {
         const auth = sp.get('auth')
         const headers = auth ? { Authorization: decodeURIComponent(auth) } : undefined
 
-        const loadingTask = pdfjsLib.getDocument({
-          url: urlParam,
-          withCredentials: sendCreds,
-          httpHeaders: headers,
-          disableAutoFetch: true,     // 避免自动预取整本
-          rangeChunkSize: 65536,      // 64KB 分块，服务器需支持 Range
-          disableStream: false,
-        })
-        const doc: PDFDocumentProxy = await loadingTask.promise
+        // 规范化 URL，确保空格等字符被编码
+        const normalizedUrl = encodeURI(urlParam)
+
+        async function tryGetDocument(opts: any) {
+          const task = pdfjsLib.getDocument({
+            url: normalizedUrl,
+            withCredentials: sendCreds,
+            httpHeaders: headers,
+            ...opts,
+          })
+          return await task.promise
+        }
+
+        let doc: PDFDocumentProxy | null = null
+        try {
+          // 首选（更快）：启用流式与 Range
+          doc = await tryGetDocument({
+            disableAutoFetch: true,
+            disableStream: false,
+            rangeChunkSize: 65536,
+          })
+        } catch (e: any) {
+          console.warn('[PDF] 首选加载失败，尝试无 Range 回退: ', e)
+          // 回退（更兼容）：禁用 Stream/Range，避免跨域/预检不通过
+          doc = await tryGetDocument({
+            disableAutoFetch: false,
+            disableStream: true,
+            disableRange: true,
+          })
+        }
+
         if (cancelled) return
         setPdf(doc)
         setNumPages(doc.numPages)
         renderedGenRef.current.clear()
         renderGenRef.current++
       } catch (e: any) {
-        if (!cancelled) setError(e?.message || '加载 PDF 失败')
+        if (!cancelled) setError(e?.message || '加载 PDF 失败（可能为 CORS/Range 不被允许）')
       } finally {
         if (!cancelled) setLoading(false)
       }
