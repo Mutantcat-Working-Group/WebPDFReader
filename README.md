@@ -30,9 +30,6 @@
     - https://pdfreader.mutantcat.ip-ddns.com
     - https://mutantcat-working-group.github.io/WebPDFReader
 
-- 应用示例地址
-    - https://www.jqshengtian.top
-
 ### 四、其他说明
 - 如遇bug可及时提交issue，当然纯文字issue描述现象也可以
 - 欢迎Fork自己的版本实现不同样式、性能、用法
