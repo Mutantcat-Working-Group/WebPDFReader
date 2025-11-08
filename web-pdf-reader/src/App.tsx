@@ -165,15 +165,36 @@ function App() {
       wrapper.classList.toggle('centered', shouldCenter)
     }
 
-    const ctx = canvas.getContext('2d')
+  const ctx = canvas.getContext('2d')
     if (!ctx) return
 
-    const dpr = window.devicePixelRatio || 1
-    canvas.width = Math.floor(viewport.width * dpr)
-    canvas.height = Math.floor(viewport.height * dpr)
-    canvas.style.width = `${Math.floor(viewport.width)}px`
-    canvas.style.height = `${Math.floor(viewport.height)}px`
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+  // 为避免在部分安卓/国产浏览器上超出 Canvas 尺寸/面积上限导致白屏，
+  // 动态下调实际渲染像素密度（有效 DPR），CSS 尺寸保持不变
+  const dpr = window.devicePixelRatio || 1
+  // 经验上限：部分 Android/WebView 设备在 4096~8192 维度、~16MP 面积存在限制
+  const ua = navigator.userAgent || ''
+  const isConservativeDevice = /Android|Lenovo|Pad|ZUI|TB-|TB\-|PAD/i.test(ua)
+  const MAX_DIM = isConservativeDevice ? 4096 : 8192
+  const MAX_PIXELS = 16_000_000 // 约 16MP
+
+  const targetPixelW = viewport.width * dpr
+  const targetPixelH = viewport.height * dpr
+  const area = targetPixelW * targetPixelH
+
+  // 计算需要缩放的比例（<=1）
+  const dimFactor = Math.min(1, MAX_DIM / Math.max(targetPixelW, targetPixelH))
+  const areaFactor = Math.min(1, Math.sqrt(MAX_PIXELS / Math.max(area, 1)))
+  const factor = Math.max(0.5, Math.min(dimFactor, areaFactor)) // 下限 0.5，避免过糊
+  const effectiveDpr = dpr * factor
+
+  const pixelW = Math.max(1, Math.floor(viewport.width * effectiveDpr))
+  const pixelH = Math.max(1, Math.floor(viewport.height * effectiveDpr))
+  canvas.width = pixelW
+  canvas.height = pixelH
+  // 保持布局尺寸不变（由浏览器缩放像素到 CSS 尺寸）
+  canvas.style.width = `${Math.floor(viewport.width)}px`
+  canvas.style.height = `${Math.floor(viewport.height)}px`
+  ctx.setTransform(effectiveDpr, 0, 0, effectiveDpr, 0, 0)
 
     const task = page.render({ canvasContext: ctx, viewport })
     renderTaskMapRef.current.set(pageNo, task)

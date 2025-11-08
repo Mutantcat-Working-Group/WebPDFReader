@@ -34,6 +34,7 @@
     - https://www.jqshengtian.top
 
 ### 四、其他说明
+- 过旧的浏览器，例如苹果Safari 15.4 及更早版本会出现Promise.withResolvers is not a function.问题。
 - 如遇bug可及时提交issue，当然纯文字issue描述现象也可以
 - 欢迎Fork自己的版本实现不同样式、性能、用法
 - 同时欢迎Star或者贡献本项目
