@@ -69,6 +69,27 @@ html, body, #root {
   pointer-events: none; /* allow clicks only on inner content */
 }
 
+/* Publisher line below the document viewport */
+.pdf-publisher {
+  flex: none;
+  text-align: center;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.7);
+  padding: 4px 12px 10px;
+  line-height: 1.4;
+  word-break: break-all;
+}
+
+.pdf-publisher a {
+  color: rgba(255, 255, 255, 0.85);
+  text-decoration: none;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.3);
+}
+
+.pdf-publisher a:hover {
+  color: #fff;
+}
+
 .pdf-controls-inner {
   pointer-events: auto;
   display: flex;

@@ -429,6 +429,13 @@ function App() {
         )}
       </div>
 
+      <div className="pdf-publisher">
+        由异猫工作群（mutantcat.org）发行 ·{' '}
+        <a href="https://github.com/Mutantcat-Working-Group" target="_blank" rel="noopener noreferrer">
+          github.com/Mutantcat-Working-Group
+        </a>
+      </div>
+
       {/* Toggle button for controls visibility */}
       <button
         className="pdf-toggle-visibility"
